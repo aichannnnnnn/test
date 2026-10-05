@@ -1,0 +1,28 @@
+[project]
+name = "devin-usage"
+version = "0.1.0"
+description = "Devinの利用量（ACU）を時間帯ごとに集計するCLIとWebダッシュボード"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[project.scripts]
+devin-usage = "devin_usage.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["devin_usage"]
+
+[tool.setuptools.package-data]
+devin_usage = ["static/*.html"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

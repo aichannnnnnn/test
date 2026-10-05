@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Devin利用量</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --fg:#e2e8f0; --muted:#94a3b8; --bar:#38bdf8; --accent:#f59e0b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, "Hiragino Sans", "Noto Sans JP", sans-serif; background:var(--bg); color:var(--fg); }
+  main { max-width: 960px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 1.4rem; margin: 0 0 16px; }
+  .controls { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-bottom:16px; color:var(--muted); }
+  select, button { background:var(--card); color:var(--fg); border:1px solid #334155; border-radius:6px; padding:6px 10px; font-size:0.95rem; }
+  button { cursor:pointer; }
+  .cards { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:16px; }
+  .card { background:var(--card); border-radius:10px; padding:14px 16px; }
+  .card .label { color:var(--muted); font-size:0.85rem; }
+  .card .value { font-size:1.8rem; font-weight:700; margin-top:4px; }
+  .chart { background:var(--card); border-radius:10px; padding:16px; display:flex; align-items:flex-end; gap:8px; height:260px; overflow-x:auto; }
+  .col { flex:1; min-width:56px; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%; cursor:pointer; }
+  .col .num { font-size:0.8rem; margin-bottom:4px; }
+  .col .bar { width:100%; background:var(--bar); border-radius:6px 6px 0 0; min-height:2px; transition:height .3s; }
+  .col.selected .bar { background:var(--accent); }
+  .col .when { font-size:0.72rem; color:var(--muted); margin-top:6px; text-align:center; white-space:pre-line; }
+  table { width:100%; border-collapse:collapse; margin-top:16px; background:var(--card); border-radius:10px; overflow:hidden; }
+  th, td { padding:8px 12px; text-align:left; border-bottom:1px solid #334155; font-size:0.9rem; }
+  th { color:var(--muted); font-weight:600; }
+  td.num { text-align:right; font-variant-numeric: tabular-nums; }
+  a { color:var(--bar); }
+  .error { background:#7f1d1d; padding:12px 16px; border-radius:8px; margin-bottom:16px; white-space:pre-wrap; }
+  .muted { color:var(--muted); font-size:0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Devin利用量ダッシュボード</h1>
+  <div class="controls">
+    <label>区間 <select id="hours"><option>1</option><option>3</option><option>4</option><option selected>5</option><option>6</option><option>8</option><option>12</option><option>24</option></select> 時間</label>
+    <label>× <select id="windows"><option>3</option><option selected>6</option><option>9</option><option>12</option><option>21</option></select> 区間</label>
+    <button id="reload">更新</button>
+    <span id="updated" class="muted"></span>
+  </div>
+  <div id="error" class="error" hidden></div>
+  <div class="cards">
+    <div class="card"><div class="label">直近の区間のACU</div><div class="value" id="latest">-</div></div>
+    <div class="card"><div class="label">表示期間の合計ACU</div><div class="value" id="total">-</div></div>
+    <div class="card"><div class="label">表示期間のセッション数</div><div class="value" id="count">-</div></div>
+  </div>
+  <div class="chart" id="chart"></div>
+  <p class="muted">セッションのACUは、開始した時刻の区間にまとめて数えています。棒をクリックすると、その区間のセッションを表示します。</p>
+  <table>
+    <thead><tr><th>開始</th><th>タイトル</th><th>状態</th><th class="num">ACU</th></tr></thead>
+    <tbody id="sessions"></tbody>
+  </table>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt = (t) => new Date(t * 1000).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+let data = null;
+let selected = 0;
+
+function el(tag, props = {}, children = []) {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children);
+  return node;
+}
+
+function renderChart() {
+  const max = Math.max(...data.windows.map((w) => w.acus), 0.01);
+  const cols = [...data.windows].reverse().map((w) => {
+    const index = data.windows.indexOf(w);
+    const col = el("div", { className: "col" + (index === selected ? " selected" : "") }, [
+      el("div", { className: "num", textContent: w.acus.toFixed(2) }),
+      el("div", { className: "bar", style: `height:${(w.acus / max) * 80}%` }),
+      el("div", { className: "when", textContent: `${fmt(w.start)}\n〜${fmt(w.end)}` }),
+    ]);
+    col.onclick = () => { selected = index; render(); };
+    return col;
+  });
+  $("chart").replaceChildren(...cols);
+}
+
+function renderSessions() {
+  const rows = data.windows[selected].sessions.map((s) => el("tr", {}, [
+    el("td", { textContent: fmt(s.created_at) }),
+    el("td", {}, [s.url ? el("a", { href: s.url, target: "_blank", rel: "noopener", textContent: s.title }) : s.title]),
+    el("td", { textContent: s.status }),
+    el("td", { className: "num", textContent: s.acus.toFixed(2) }),
+  ]));
+  $("sessions").replaceChildren(...(rows.length ? rows : [el("tr", {}, [el("td", { colSpan: 4, className: "muted", textContent: "この区間のセッションはありません" })])]));
+}
+
+function render() {
+  $("latest").textContent = data.windows[0].acus.toFixed(2);
+  $("total").textContent = data.total_acus.toFixed(2);
+  $("count").textContent = data.total_sessions;
+  $("updated").textContent = `最終更新 ${fmt(data.generated_at)}`;
+  renderChart();
+  renderSessions();
+}
+
+async function load() {
+  const res = await fetch(`/api/usage?hours=${$("hours").value}&windows=${$("windows").value}`);
+  const body = await res.json();
+  $("error").hidden = res.ok;
+  if (!res.ok) { $("error").textContent = body.error; return; }
+  data = body;
+  selected = Math.min(selected, data.windows.length - 1);
+  render();
+}
+
+$("reload").onclick = load;
+$("hours").onchange = load;
+$("windows").onchange = load;
+setInterval(load, 5 * 60 * 1000);
+load();
+</script>
+</body>
+</html>
